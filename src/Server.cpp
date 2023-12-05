@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <sstream>
+#include <algorithm>
 
 constexpr int DB_HEADER_SIZE = 100;
 constexpr int LEAF_PAGE_HEADER_SIZE = 8;
@@ -43,6 +44,13 @@ struct Row {
     size_t row_size;
     std::vector<RowField> field;
 };
+
+std::string lower_string (std::string s) {
+    std::string result = s;
+    std::transform(result.begin(), result.end(), result.begin(),
+    [](unsigned char c){ return std::tolower(c); });
+    return result;
+}
 
 std::vector<std::string> split_string (const std::string &str, const char delimiter) {
     std::vector<std::string> output;
@@ -232,7 +240,7 @@ int main(int argc, char* argv[]) {
             std::cout << *static_cast<std::string*>(r.field[2].field_value) << std::endl;
         }
 
-    } else if (std::vector<std::string> c = split_string(command, ' '); c[1] == "COUNT(*)") {
+    } else if (std::vector<std::string> c = split_string(command, ' '); lower_string(c[1]) == "count(*)") {
         std::string table = c.back();
         unsigned short root_page = root_page_map[table];
         database_file.seekg((root_page - 1) * page_size + 3, std::ios::beg);
@@ -241,19 +249,5 @@ int main(int argc, char* argv[]) {
         unsigned short cell_count = parse_short(buf);
         printf("%u\n", cell_count);
     }
-
-    /*
-        parse sql query
-        find where the command and the table lie
-        find the table, we got to the root page
-    */
-    /* Reading database page
-    1. Check page type (offset 0), to get the header size
-    2. If command == COUNT(*), then take offset 3 to get number of cells
-    3. To access the rows, offset is + HEADER_SIZE
-    */
-
-
-
     return 0;
 }
