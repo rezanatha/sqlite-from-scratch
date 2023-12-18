@@ -6,44 +6,9 @@
 #include <memory>
 #include <sstream>
 #include <algorithm>
-
-constexpr int DB_HEADER_SIZE = 100;
-constexpr int LEAF_PAGE_HEADER_SIZE = 8;
-constexpr int INTERIOR_PAGE_HEADER_SIZE = 12;
-
-std::ifstream database_file;
-
-enum PageType {
-    INTERIOR_INDEX = 2,
-    INTERIOR_TABLE = 5,
-    LEAF_INDEX = 10,
-    LEAF_TABLE = 13
-};
-
-enum SerialType {
-    SERIAL_NULL = 0,
-    SERIAL_8_BIT_INTEGER = 1,
-    SERIAL_BLOB_EVEN = 12,
-    SERIAL_BLOB_ODD = 13
-};
-
-enum Encoding {
-    UTF8 = 1,
-    UTF16LE = 2,
-    UTF16BE = 3
-};
-
-struct RowField {
-    SerialType field_type;
-    int field_size;
-    void* field_value;
-};
-
-struct Row {
-    unsigned int row_id;
-    size_t row_size;
-    std::vector<RowField> field;
-};
+#include "Decode.h"
+#include "Database.h"
+#include "Query.h"
 
 std::string lower_string (std::string s) {
     std::string result = s;
@@ -54,8 +19,7 @@ std::string lower_string (std::string s) {
 
 std::vector<std::string> split_string (const std::string &str, const char delimiter) {
     std::vector<std::string> output;
-    std::stringstream ss;
-    ss << str;
+    std::stringstream ss(str);
     std::string token;
 
     while (std::getline(ss, token, delimiter) ) {
@@ -63,98 +27,6 @@ std::vector<std::string> split_string (const std::string &str, const char delimi
     }
     return output;
 }
-
-void parse_sql_command (const std::string &command) {
-
-}
-
-unsigned short parse_short (const char *buffer) {
-    /* read 2 bytes in big endian */
-    return ((static_cast<unsigned char>(buffer[0]) << 8) | static_cast<unsigned char>(buffer[1]));
-}
-
-unsigned int parse_int (const char *buffer) {
-    /* read 4 bytes in big endian */
-    return ((static_cast<unsigned char>(buffer[0]) << 16) 
-            | static_cast<unsigned char>(buffer[1])
-            | static_cast<unsigned char>(buffer[2])
-            | static_cast<unsigned char>(buffer[3])
-            );
-}
-
-int read_varint (unsigned short starting_offset, unsigned short &new_offset) {
-    /*
-    Read bytes from the varint_start (equal to offset)
-    If bit at varint_start equals to 0, then it is the last byte
-    If bit at varint_start equals to 1, then more bytes follow
-    */
-    unsigned short start = starting_offset;
-    int varint_value = 0;
-    char buf[1];
-    while (true) {
-        database_file.seekg(start);
-        database_file.read(buf, 1); 
-        varint_value = varint_value | buf[0]; //concat our bit
-        start++;
-        if (!(buf[0] & 0x80))  { //MSB is 0
-            break;
-        }
-        varint_value = (varint_value & 0x7F) << 8;
-    }  
-    new_offset = start;
-    return varint_value;
-}
-
-std::vector<RowField> read_row (unsigned short offset) {
-    /*
-    Payload structure:
-    Row header size
-    Field ID
-    Value
-    */
-    std::vector<RowField> fields;
-    unsigned short field_id_offset = offset;
-    int row_header_size = read_varint(offset, field_id_offset);
-    unsigned short start = field_id_offset;
-    int end = start + row_header_size - 1;
-    while (start < end) {
-        int serial_type = read_varint(start, start);
-        if (serial_type >= 13 && serial_type & 1) {
-            RowField field;
-            field.field_type = SERIAL_BLOB_ODD;
-            field.field_size = (serial_type - 13) >> 1;
-            fields.push_back(field);
-        } else if (serial_type == 1) {
-            RowField field;
-            //printf("serial type: %d \n", serial_type);
-            field.field_type = SERIAL_8_BIT_INTEGER;
-            field.field_size = 1;
-            fields.push_back(field);
-        }
-
-    }
-    for (auto it = fields.begin(); it != fields.end(); ++it) {
-        if (it->field_type == SERIAL_BLOB_ODD) {
-            char buf[1024] = {};
-            database_file.seekg(start, std::ios::beg);
-            database_file.read(buf, it->field_size);
-            start += it->field_size;
-            std::string *s = new std::string(buf);
-            it->field_value = static_cast<void*>(s);
-        } else if (it->field_type == SERIAL_8_BIT_INTEGER) {
-            char buf[1] = {};
-            database_file.seekg(start, std::ios::beg);
-            database_file.read(buf, it->field_size);
-            start += it->field_size;
-            unsigned short *val = new unsigned short(static_cast<unsigned char>(buf[0]));
-            //printf("rp: %u \n", *val);
-            it->field_value = static_cast<void*>(val);
-        }
-    }
-
-    return fields;
-}
-
 
 int main(int argc, char* argv[]) {
     if (argc != 3) {
@@ -164,69 +36,32 @@ int main(int argc, char* argv[]) {
 
     std::string database_file_path = argv[1];
     std::string command = argv[2];
+    
+    std::shared_ptr<std::ifstream> db_object (new std::ifstream(database_file_path, std::ios::binary));
+    Database::db = db_object.get();
 
-    database_file.open(database_file_path, std::ios::binary);
 
-    if (!database_file) {
+    if (!Database::db) {
         std::cerr << "Failed to open the database file" << std::endl;
         return 1;
     }
+    
+    uint32_t page_size = Database::db_header_page_size();
+    uint32_t num_page = Database::db_header_num_of_pages();
+    uint32_t encoding = Database::db_header_encoding();
 
-    //Read page size
-    database_file.seekg(16, std::ios::beg);
-    char page_size_buffer[2];
-    database_file.read(page_size_buffer, 2);
-    unsigned int page_size = parse_short(page_size_buffer);
-
-    //Read page size: Exception on page_size_buffer = 0x00 0x01, it represents value 65536
-    if(page_size == 1) { 
-        page_size = 65536;
-    }
-
-    //Read number of page size
-    database_file.seekg(28, std::ios::beg);
-    char buf[4];
-    database_file.read(buf, 4);
-    unsigned int num_page = parse_int(buf);
-
-    //Read cell count
-    database_file.seekg(DB_HEADER_SIZE + 3, std::ios::beg);
-    char cell_count_buffer[2];
-    database_file.read(cell_count_buffer, 2);
-    unsigned short cell_count = parse_short(cell_count_buffer);
-
-    //Read encoding
-    database_file.seekg(56, std::ios::beg);
-    char enc_buf[4] = {};
-    database_file.read(enc_buf, 4);
-    unsigned int encoding = parse_int(enc_buf);
+    uint16_t cell_count = Database::master_header_cell_count();
 
     // Process master table
-    // Master table is a leaf b-tree that resides just after database header. 
-    // Cell offsets are located after master table's header.
-    int cell_offset = DB_HEADER_SIZE + LEAF_PAGE_HEADER_SIZE; 
-    
-    std::vector<unsigned short> cell_offsets;
-    std::vector<Row> master_table;
-    std::map<std::string, unsigned short> root_page_map;
-    for (int i = 0; i < cell_count; ++i) {
-        database_file.seekg(cell_offset, std::ios::beg);
-        char buf[2] = {};
-        database_file.read(buf, 2);
-        cell_offsets.push_back(parse_short(buf));
-        cell_offset += 2;
-    }
-    for (auto &offset: cell_offsets) {
-        Row row;
-        unsigned short row_id_offset = offset, payload_offset = offset;
-        row.row_size = read_varint(offset, row_id_offset);
-        row.row_id = read_varint(row_id_offset, payload_offset);
-        row.field = read_row(payload_offset);
-        master_table.push_back(row);
+    std::vector<Database::Row> master_table = Database::read_master_table();
+    std::map<std::string, Database::Row*> table_map;
+
+    for (auto &row: master_table) {
         std::string table_name = *static_cast<std::string*>(row.field[2].field_value);
-        unsigned short root_page_num = *static_cast<unsigned short*>(row.field[3].field_value);
-        root_page_map[table_name] = root_page_num; 
-    }
+        //uint16_t root_page_num = *static_cast<uint16_t*>(row.field[3].field_value);
+        table_map[table_name] = &row;
+    }  
+
     //Process command
     if (command == ".dbinfo") {
         printf("database page size: %u \n", page_size);
@@ -235,19 +70,50 @@ int main(int argc, char* argv[]) {
         //printf("encoding: %u \n", encoding); 
 
     } else if (command == ".tables") {
-        for (auto &r: master_table) {
-            //printf("row size %zu, row_id %d ", r.row_size, r.row_id); 
-            std::cout << *static_cast<std::string*>(r.field[2].field_value) << std::endl;
+        for (auto r: master_table) {
+            //0 = 
+            printf("row size %zu, row_id %d ", r.row_size, r.row_id);
+            uint32_t field_type = r.field[4].field_type;
+            int field_size = r.field[4].field_size;
+            std::string s = *static_cast<std::string*>(r.field[4].field_value);
+            //printf("%s \n", s.c_str());
+            std::cout << field_type << " " << field_size << std::endl;
+            std::cout << std::endl;
         }
 
-    } else if (std::vector<std::string> c = split_string(command, ' '); lower_string(c[1]) == "count(*)") {
-        std::string table = c.back();
-        unsigned short root_page = root_page_map[table];
-        database_file.seekg((root_page - 1) * page_size + 3, std::ios::beg);
-        buf[2] = {};
-        database_file.read(buf, 2);
-        unsigned short cell_count = parse_short(buf);
-        printf("%u\n", cell_count);
+    } else {
+        Query::DQLStatement query = Query::parse_query(command);
+        //std::cout << query.columns[0] << std::endl;
+        //std::cout << query.table << std::endl;
+
+        Query::process_select_from_statement(query, table_map, page_size);
+
+        // std::vector<std::string> c = split_string(command, ' '); 
+        // if (lower_string(c[1]) == "count(*)") {
+        //     std::string table = c.back();
+        //     uint16_t root_page = root_page_map[table];
+        //     Database::db->seekg((root_page - 1) * page_size + 3, std::ios::beg);
+        //     char buf[2] = {};
+        //     Database::db->read(buf, 2);
+        //     uint16_t cell_count = Decode::to_uint16_t(buf);
+        //     printf("%u\n", cell_count);
+        // }
+
+        /* homework
+        the goal is to read sql query so it outputs desired result
+
+        SELECT t1, t2, t3 FROM table WHERE t4 = 10
+               ^^^^^^^^^^      ^^^^^      ^^^^^^^^^
+                columns     target table   filter
+            (comma-separated)
+        
+        1. Design function to read query and return a query object. Split the query like above.
+        2. Design function to parse table definition so we can locate at which field of a row a column is
+        3. We already know the root page number, we can locate the table in the binary and read it just like we read our master table
+        3. Design function to print the result as desired, table-like
+
+        
+        */
     }
     return 0;
 }
