@@ -10,13 +10,6 @@
 #include "Database.h"
 #include "Query.h"
 
-std::string lower_string (std::string s) {
-    std::string result = s;
-    std::transform(result.begin(), result.end(), result.begin(),
-    [](unsigned char c){ return std::tolower(c); });
-    return result;
-}
-
 std::vector<std::string> split_string (const std::string &str, const char delimiter) {
     std::vector<std::string> output;
     std::stringstream ss(str);

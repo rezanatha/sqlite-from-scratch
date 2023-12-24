@@ -71,6 +71,7 @@ namespace Query {
             throw std::logic_error("Expected FROM clause.");
         }
     }
+
     DDLStatement parse_table_definition (
         const std::string &table_name,
         const std::string &table_definition) {
@@ -113,6 +114,27 @@ namespace Query {
         return def;
     }
 
+    void print_query_result (const DQLStatement &query, const DDLStatement &table_def, std::vector<Database::Cell> &table) {
+        std::map<std::string, size_t> map_column_position;
+        for(size_t i = 0; i < table_def.columns.size(); ++i) {
+            map_column_position[table_def.columns[i]] = i; 
+            //std::cout << def.columns[i] << ";" << std::endl;
+        }
+        
+        //output table entries according to query (No filter, no limit)
+        for (auto &row: table) {
+            size_t column_length = query.columns.size();
+            std::vector<std::string> columns = query.columns;
+            for (size_t i = 0; i < column_length; ++i) {
+                Database::RowField field = row.field[map_column_position[columns[i]]-1];
+                std::cout << *static_cast<std::string*>(field.field_value);
+                if(column_length > 1 && i != column_length-1) {
+                    std::cout << '|';
+                }
+            }
+            std::cout << std::endl;
+        }
+    }
 
     void process_select_from_statement(
          const DQLStatement &query, 
@@ -120,8 +142,13 @@ namespace Query {
          uint32_t page_size
     ) {
         auto master_table_row = table_map.at(query.table);
+
+        //parse table definition
         std::string table_name = *static_cast<std::string*>(master_table_row->field[2].field_value);
         std::string table_definition = *static_cast<std::string*>(master_table_row->field[4].field_value);
+        DDLStatement def = parse_table_definition(table_name, table_definition);
+
+        //get page offset
         uint16_t root_page = *static_cast<uint16_t*>(master_table_row->field[3].field_value);
         const uint16_t page_offset = (root_page - 1) * page_size;
 
@@ -192,26 +219,8 @@ namespace Query {
             //         std::cout << *static_cast<std::string*>(column.field_value) << '|';
             //     }
             //     std::cout << std::endl;
-            // }
-
-            //map columns in the query to its location (0-indexed) in table definition
-            std::map<std::string, size_t> map_column_position;
-            DDLStatement def = parse_table_definition(table_name, table_definition);
-            
-
-            for(size_t i = 0; i < def.columns.size(); ++i) {
-                map_column_position[def.columns[i]] = i; 
-                //std::cout << def.columns[i] << ";" << std::endl;
-            }
-            
-            //output table entries according to query (No filter, no limit)
-            for (auto &row: table) {
-                for (auto &column: query.columns) {
-                    Database::RowField field = row.field[map_column_position[column]-1];
-                    std::cout << *static_cast<std::string*>(field.field_value);
-                }
-                std::cout << std::endl;
-            }
+            // }            
+            print_query_result(query, def, table);
         }
 
     }
