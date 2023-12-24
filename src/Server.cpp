@@ -53,8 +53,8 @@ int main(int argc, char* argv[]) {
     uint16_t cell_count = Database::master_header_cell_count();
 
     // Process master table
-    std::vector<Database::Row> master_table = Database::read_master_table();
-    std::map<std::string, Database::Row*> table_map;
+    std::vector<Database::Cell> master_table = Database::read_master_table();
+    std::map<std::string, Database::Cell*> table_map;
 
     for (auto &row: master_table) {
         std::string table_name = *static_cast<std::string*>(row.field[2].field_value);
@@ -71,14 +71,14 @@ int main(int argc, char* argv[]) {
 
     } else if (command == ".tables") {
         for (auto r: master_table) {
-            //0 = 
-            printf("row size %zu, row_id %d ", r.row_size, r.row_id);
+            //2 = table name 4 = table definition
+            //printf("row size %zu, row_id %d ", r.row_size, r.row_id);
             uint32_t field_type = r.field[4].field_type;
             int field_size = r.field[4].field_size;
-            std::string s = *static_cast<std::string*>(r.field[4].field_value);
-            //printf("%s \n", s.c_str());
-            std::cout << field_type << " " << field_size << std::endl;
-            std::cout << std::endl;
+            std::string s = *static_cast<std::string*>(r.field[2].field_value);
+            printf("%s \n", s.c_str());
+            //std::cout << field_type << " " << field_size << std::endl;
+            //std::cout << std::endl;
         }
 
     } else {

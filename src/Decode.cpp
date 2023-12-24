@@ -36,7 +36,7 @@ namespace Decode {
     return varint_value;
     }
 
-    uint64_t read_varint_new (std::ifstream *db, uint16_t offset) {
+    uint64_t read_varint_new (std::ifstream *db, uint16_t &offset) {
         db->seekg(offset, std::ios::beg);
         uint64_t result = 0;
         int shift = 0;
@@ -50,7 +50,9 @@ namespace Decode {
     
             result |= static_cast<uint64_t>(byte & 0x7F) << shift;
             shift += 7;
+            offset++;
         } while (byte & 0x80);
+
     
     return result;
     }
