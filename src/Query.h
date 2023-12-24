@@ -12,15 +12,15 @@
 #include "Database.h"
 
 namespace Query {
-    struct Filter {
-        //column
-        //expression
-        //value
+    struct WhereCondition {
+        std::string column; //column
+        std::string expression; //expression
+        std::string value; //value
     };
     struct DQLStatement {
         std::vector<std::string> columns;
         std::string table;
-        Filter filter;
+        std::vector<WhereCondition> condition;
 
     };
 
@@ -33,6 +33,7 @@ namespace Query {
 
     std::vector<std::string> get_column (const std::string &query, size_t &offset);
     std::string get_table_name (const std::string &query, size_t &offset);
+    std::vector<WhereCondition> get_where_clause (const std::string &query, size_t &offset);
     DQLStatement parse_query (const std::string &q);
     void process_select_from_statement(
         const DQLStatement &query, 

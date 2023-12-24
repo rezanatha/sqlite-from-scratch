@@ -10,6 +10,16 @@ namespace Query {
         return result;
     }
 
+    std::string get_where_condition_string_value (std::string &s) {
+        std::stringstream ss(s);
+        ss >> std::ws;
+        std::string _;
+        std::getline(ss, _, '\'');
+        std::string value;
+        std::getline(ss, value, '\'');
+        return value;
+    }
+
     DQLStatement parse_query (const std::string &q) {
         DQLStatement parsed_query;
         std::stringstream ss(q);
@@ -20,6 +30,7 @@ namespace Query {
             size_t get_pos = ss.tellg();
             parsed_query.columns = get_column(q, get_pos);
             parsed_query.table = get_table_name(q, get_pos);
+            parsed_query.condition = get_where_clause(q, get_pos);
             return parsed_query;
         }
         else {
@@ -72,6 +83,36 @@ namespace Query {
         }
     }
 
+    std::vector<WhereCondition> get_where_clause (const std::string &query, size_t &offset) {
+        std::vector<WhereCondition> conditions;
+        std::stringstream ss(query);
+        ss.seekg(offset);
+        std::string command_WHERE;
+        ss >> std::ws;
+        std::getline(ss, command_WHERE, ' ');
+        if (lower_string(command_WHERE) == "where") {
+
+            WhereCondition cond;
+            ss >> std::ws;
+            std::getline(ss, cond.column, ' ');
+            std::getline(ss, cond.expression, ' ');
+            std::string start;
+            std::getline(ss, start, '\'');
+            if (start.size() == 0) {
+                std::getline(ss, cond.value, '\'');
+            }
+            else {
+                std::getline(ss, cond.value, ' ');
+            }
+            conditions.push_back(cond);
+            offset = ss.tellg();
+            return conditions;
+        }
+        else {
+            return {};
+        }
+    }
+
     DDLStatement parse_table_definition (
         const std::string &table_name,
         const std::string &table_definition) {
@@ -114,21 +155,52 @@ namespace Query {
         return def;
     }
 
-    void print_query_result (const DQLStatement &query, const DDLStatement &table_def, std::vector<Database::Cell> &table) {
+    void print_query_result (
+        const DQLStatement &query, 
+        const DDLStatement &table_def, 
+        std::vector<Database::Cell> &table) {
         std::map<std::string, size_t> map_column_position;
         for(size_t i = 0; i < table_def.columns.size(); ++i) {
             map_column_position[table_def.columns[i]] = i; 
             //std::cout << def.columns[i] << ";" << std::endl;
         }
         
+        // for (auto &a: query.condition) {
+        //     std::cout << a.column << '~' << a.expression << '~' << a.value << std::endl;
+        // }
+        
         //output table entries according to query (No filter, no limit)
         for (auto &row: table) {
-            size_t column_length = query.columns.size();
             std::vector<std::string> columns = query.columns;
-            for (size_t i = 0; i < column_length; ++i) {
+            std::vector<WhereCondition> conditions = query.condition;
+
+            bool skip_row = false;
+
+            for(size_t i = 0; i < conditions.size(); ++i) {
+                Database::RowField row_field = row.field[map_column_position[conditions[i].column]-1];
+                std::string expression = conditions[i].expression;
+                std::string row_value = conditions[i].value;
+                
+                if (expression == "=") {
+                    // std::cout << expression << ' ' << row_value << ' '
+                    //  << get_where_condition_string_value (row_value) << ' ' <<  *static_cast<std::string*>(row_field.field_value)
+                    //  << std::endl;
+
+                    // std::string row_value_in_string = get_where_condition_string_value(row_value);
+                    // bool is_string = row_value_in_string.size() != 0;
+                    
+                    if (row_value != *static_cast<std::string*>(row_field.field_value)) {
+                        skip_row = true;
+                    }
+                }
+            }
+            if (skip_row) {
+                continue;
+            }
+            for (size_t i = 0; i < columns.size(); ++i) {
                 Database::RowField field = row.field[map_column_position[columns[i]]-1];
                 std::cout << *static_cast<std::string*>(field.field_value);
-                if(column_length > 1 && i != column_length-1) {
+                if(columns.size() > 1 && i != columns.size() - 1) {
                     std::cout << '|';
                 }
             }
@@ -219,7 +291,8 @@ namespace Query {
             //         std::cout << *static_cast<std::string*>(column.field_value) << '|';
             //     }
             //     std::cout << std::endl;
-            // }            
+            // }  
+                     
             print_query_result(query, def, table);
         }
 
