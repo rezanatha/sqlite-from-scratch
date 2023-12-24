@@ -77,43 +77,12 @@ int main(int argc, char* argv[]) {
             int field_size = r.field[4].field_size;
             std::string s = *static_cast<std::string*>(r.field[2].field_value);
             printf("%s \n", s.c_str());
-            //std::cout << field_type << " " << field_size << std::endl;
-            //std::cout << std::endl;
         }
 
     } else {
         Query::DQLStatement query = Query::parse_query(command);
-        //std::cout << query.columns[0] << std::endl;
-        //std::cout << query.table << std::endl;
-
         Query::process_select_from_statement(query, table_map, page_size);
 
-        // std::vector<std::string> c = split_string(command, ' '); 
-        // if (lower_string(c[1]) == "count(*)") {
-        //     std::string table = c.back();
-        //     uint16_t root_page = root_page_map[table];
-        //     Database::db->seekg((root_page - 1) * page_size + 3, std::ios::beg);
-        //     char buf[2] = {};
-        //     Database::db->read(buf, 2);
-        //     uint16_t cell_count = Decode::to_uint16_t(buf);
-        //     printf("%u\n", cell_count);
-        // }
-
-        /* homework
-        the goal is to read sql query so it outputs desired result
-
-        SELECT t1, t2, t3 FROM table WHERE t4 = 10
-               ^^^^^^^^^^      ^^^^^      ^^^^^^^^^
-                columns     target table   filter
-            (comma-separated)
-        
-        1. Design function to read query and return a query object. Split the query like above.
-        2. Design function to parse table definition so we can locate at which field of a row a column is
-        3. We already know the root page number, we can locate the table in the binary and read it just like we read our master table
-        3. Design function to print the result as desired, table-like
-
-        
-        */
     }
     return 0;
 }
