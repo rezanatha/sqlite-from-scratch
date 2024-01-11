@@ -13,14 +13,14 @@ namespace Decode {
         memcpy(&result, buffer, sizeof(uint32_t));
         return ntohl(result);
     }
-    int read_varint (std::ifstream *db, uint16_t starting_offset, uint16_t &new_offset) {
+    uint64_t read_varint (std::ifstream *db, size_t starting_offset, size_t &new_offset) {
         /*
         Read bytes from the varint_start (equal to offset)
         If bit at varint_start equals to 0, then it is the last byte
         If bit at varint_start equals to 1, then more bytes follow
         */
-        uint16_t start = starting_offset;
-        int varint_value = 0;
+        size_t start = starting_offset;
+        uint64_t varint_value = 0;
         char buf[1];
         while (true) {
             db->seekg(start, std::ios::beg);

@@ -37,7 +37,7 @@ namespace Query {
     DQLStatement parse_query (const std::string &q);
     void process_select_from_statement(
         const DQLStatement &query, 
-        const std::map<std::string, Database::Cell*> &table_map, 
+        const std::map<std::string, Database::TableLeafCell*> &table_map, 
         uint32_t page_size);
     DDLStatement parse_table_definition (
         const std::string &table_name,

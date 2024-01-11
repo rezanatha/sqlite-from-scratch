@@ -9,9 +9,11 @@ namespace Database {
 
     extern std::ifstream *db;
 
-    constexpr int DB_HEADER_SIZE = 100;
-    constexpr int LEAF_PAGE_HEADER_SIZE = 8;
-    constexpr int INTERIOR_PAGE_HEADER_SIZE = 12;
+    enum HeaderSize {
+        DATABASE = 100,
+        LEAF = 8,
+        INTERIOR = 12
+    };
 
     enum PageType {
         INTERIOR_INDEX = 2,
@@ -41,20 +43,25 @@ namespace Database {
         void* field_value;
     };
 
-    struct Cell {
+    struct TableLeafCell {
         size_t payload_size;
         uint32_t rowid;
         std::vector<RowField> field;
     };
 
-    std::vector<RowField> read_row (uint16_t offset);
-    std::vector<RowField> read_row_debug (uint16_t offset);
+    struct TableInteriorCell {
+        uint32_t left_child_pointer;
+        uint32_t rowid;
+    };
+
+    std::vector<RowField> read_row (size_t offset);
+    std::vector<RowField> read_row_debug (size_t offset);
     uint32_t db_header_page_size();
     uint32_t db_header_num_of_pages();
     uint32_t db_header_encoding();
 
     uint16_t master_header_cell_count();
-    std::vector<Cell> read_master_table();
+    std::vector<TableLeafCell> read_master_table();
 }
 
 #endif

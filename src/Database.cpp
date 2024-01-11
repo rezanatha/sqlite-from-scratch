@@ -3,10 +3,10 @@
 namespace Database {
     std::ifstream *db;
 
-    std::vector<RowField> read_row_debug (uint16_t offset) {
+    std::vector<RowField> read_row_debug (size_t offset) {
         std::vector<RowField> fields;
-        uint16_t field_id_offset = offset;
-        int row_header_size = Decode::read_varint(db, offset, field_id_offset);
+        size_t field_id_offset = offset;
+        uint32_t row_header_size = Decode::read_varint(db, offset, field_id_offset);
         //std::cout << "starting payload offset (header): " << offset << std::endl;
         // int row_header_size = Decode::read_varint_new(db, offset);
         // field_id_offset = offset;
@@ -14,13 +14,13 @@ namespace Database {
 
         printf("row header size: %d \n", row_header_size);
         //printf("field_id_offset: %u \n", field_id_offset);
-        uint16_t start = field_id_offset;
-        int end = start + row_header_size - 1;
-        printf("(start, end) = %d %d \n", start, end);
+        size_t start = field_id_offset;
+        size_t end = start + row_header_size - 1;
+        printf("(start, end) = %zu %zu \n", start, end);
         int counter = 0;
         while (start < end) {
             counter++;
-            int32_t serial_type = Decode::read_varint(db, start, start);
+            uint32_t serial_type = Decode::read_varint(db, start, start);
             printf("serial type: %d \n", serial_type);
             if (serial_type >= 13 && serial_type & 1) {
                 RowField field;
@@ -81,16 +81,16 @@ namespace Database {
         return fields;
     }
 
-    std::vector<RowField> read_row (uint16_t offset) {
+    std::vector<RowField> read_row (size_t offset) {
         std::vector<RowField> fields;
-        uint16_t field_id_offset = offset;
-        int row_header_size = Decode::read_varint(db, offset, field_id_offset);
+        size_t field_id_offset = offset;
+        size_t row_header_size = Decode::read_varint(db, offset, field_id_offset);
         //printf("row header size: %d \n", row_header_size);
         //printf("field_id_offset: %u \n", field_id_offset);
-        uint16_t start = field_id_offset;
-        int end = start + row_header_size - 1;
+        size_t start = field_id_offset;
+        size_t end = start + row_header_size - 1;
         while (start < end) {
-            int32_t serial_type = Decode::read_varint(db, start, start);
+            uint32_t serial_type = Decode::read_varint(db, start, start);
             //printf("serial type: %d \n", serial_type);
             if (serial_type >= 13 && serial_type & 1) {
                 RowField field;
@@ -153,19 +153,19 @@ namespace Database {
     }
 
     uint16_t master_header_cell_count() {
-        db->seekg(DB_HEADER_SIZE + 3, std::ios::beg);
+        db->seekg(Database::HeaderSize::DATABASE + 3, std::ios::beg);
         char buf[2];
         Database::db->read(buf, 2);
         return Decode::to_uint16_t(buf);
     }
 
-    std::vector<Cell> read_master_table () {
+    std::vector<TableLeafCell> read_master_table () {
         // Master table is a leaf b-tree that resides just after database header. 
         // Cell offsets are located after master table's header.
         uint16_t cell_count = master_header_cell_count();
-        int cell_offset = DB_HEADER_SIZE + LEAF_PAGE_HEADER_SIZE; 
+        int cell_offset = Database::HeaderSize::DATABASE + Database::HeaderSize::LEAF; 
         //std::cout << "offset: " << cell_offset << std::endl;
-        std::vector<uint16_t> cell_offsets;
+        std::vector<size_t> cell_offsets;
         for (int i = 0; i < cell_count; ++i) {
             db->seekg(cell_offset, std::ios::beg);
             char buf[2] = {};
@@ -178,13 +178,14 @@ namespace Database {
         //     std::cout << a << std::endl;
         // }
 
-        std::vector<Cell> master_table;
+        std::vector<TableLeafCell> master_table;
         for (auto &offset: cell_offsets) {
-            uint16_t row_id_offset = offset, payload_offset = offset;
-            Cell cell;
-            cell.payload_size = Decode::read_varint(Database::db, offset, row_id_offset);
-            cell.rowid = Decode::read_varint(Database::db, row_id_offset, payload_offset);
-            cell.field = read_row(payload_offset);
+            size_t row_id_offset = offset, payload_offset = offset;
+            TableLeafCell cell = {
+                .payload_size = static_cast<size_t>(Decode::read_varint(Database::db, offset, row_id_offset)),
+                .rowid =  static_cast<uint32_t>(Decode::read_varint(Database::db, row_id_offset, payload_offset)),
+                .field = read_row(payload_offset),
+            };
             // Row row = {
             //     .row_size = Decode::read_varint(Database::db, offset, row_id_offset),
             //     .row_id = Decode::read_varint(Database::db, row_id_offset, payload_offset),

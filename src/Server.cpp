@@ -46,21 +46,20 @@ int main(int argc, char* argv[]) {
     uint16_t cell_count = Database::master_header_cell_count();
 
     // Process master table
-    std::vector<Database::Cell> master_table = Database::read_master_table();
-    std::map<std::string, Database::Cell*> table_map;
+    std::vector<Database::TableLeafCell> master_table = Database::read_master_table();
+    std::map<std::string, Database::TableLeafCell*> table_map;
 
     for (auto &row: master_table) {
         std::string table_name = *static_cast<std::string*>(row.field[2].field_value);
-        //uint16_t root_page_num = *static_cast<uint16_t*>(row.field[3].field_value);
         table_map[table_name] = &row;
     }  
 
     //Process command
     if (command == ".dbinfo") {
         printf("database page size: %u \n", page_size);
-        //printf("number of pages: %u \n", num_page);
+        printf("number of pages: %u \n", num_page);
         printf("number of tables: %u \n", cell_count); 
-        //printf("encoding: %u \n", encoding); 
+        printf("encoding: %u \n", encoding); 
 
     } else if (command == ".tables") {
         for (auto r: master_table) {
