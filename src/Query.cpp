@@ -308,7 +308,7 @@ namespace Query {
                     field.field_size = 0;
                     field.field_value = &row.rowid;
                     std::cout << std::to_string(row.rowid);
-                } else if (row.field.size() > map_column_position[columns[i]]-1) {
+                } else if (map_column_position[columns[i]]-1 < row.field.size()) {
                     field = row.field[map_column_position[columns[i]]-1];
                     std::cout << *static_cast<std::string*>(field.field_value);
                 } else {
