@@ -247,7 +247,7 @@ namespace Query {
 
         for(size_t i = 0; i < table_def.columns.size(); ++i) {
             if (table_def.additional_statement[i] == "primary key autoincrement") {
-                map_column_position[table_def.columns[i]] = 0; //indicate the column is a primary key
+                map_column_position[table_def.columns[i]] = -1; //indicate the column is a primary key
             } else {
                 map_column_position[table_def.columns[i]] = i; 
             }
@@ -266,32 +266,45 @@ namespace Query {
         }
         int counter = 0;
         for (auto &row: table) {
+            //std::cout << "size: " << row.field.size() << std::endl;
+            // for (auto f: row.field) {
+            //     std::cout << f.field_type << " - " << f.field_size << " - ";
+            //     if (f.field_type == Database::SerialType::SERIAL_NULL) {
+            //         std::cout << "NULL" << '|';
+            //     }
+            //     else {
+            //         std::cout << *static_cast<std::string*>(f.field_value) << '|';
+            //     }
+            // }
+            // std::cout << std::endl;
+
             bool skip_row = false;     
             for(size_t i = 0; i < conditions.size(); ++i) {
                 
                 Database::RowField row_field;
                 std::string expression;
                 std::string row_value;
-                if (map_column_position[conditions[i].column] == 0) { //if condition == id
-                    row_field.field_size = 0;
+                if (map_column_position[conditions[i].column] == -1) { //if condition == id
+                    row_field.field_size = -1;
                     row_field.field_value = &row.rowid;
                 
-                } else if (row.field.size() > map_column_position[conditions[i].column]-1) {
-                    row_field = row.field[map_column_position[conditions[i].column]-1];
-                } else {
-                    skip_row = true;
-                    continue;
-                }
+                } else if (map_column_position[conditions[i].column] < row.field.size()) {
+                    row_field = row.field[map_column_position[conditions[i].column]];
+                    if (row_field.field_type == Database::SerialType::SERIAL_NULL) {
+                        skip_row = true;
+                        continue;
+                    } 
+                } 
 
                 expression = conditions[i].expression;
                 row_value = conditions[i].value;   
                 if (expression == "=") {
                     
-                    if (row_field.field_size == 0 && stoi(row_value) != *static_cast<uint32_t*>(row_field.field_value)) {
+                    if (row_field.field_size == -1 && stoi(row_value) != *static_cast<uint32_t*>(row_field.field_value)) {
                         skip_row = true;
                     }
 
-                    if (row_field.field_size != 0 && row_value != *static_cast<std::string*>(row_field.field_value)) {
+                    if (row_field.field_size != -1 && row_value != *static_cast<std::string*>(row_field.field_value)) {
                         skip_row = true;
                     }
 
@@ -301,24 +314,27 @@ namespace Query {
             if (skip_row) {
                 continue;
             }
-
+ 
             for (size_t i = 0; i < columns.size(); ++i) {
                 Database::RowField field;
-                if (map_column_position[columns[i]] == 0) { //if condition == id
+                if (map_column_position[columns[i]] == -1) { //if condition == id
                     field.field_size = 0;
                     field.field_value = &row.rowid;
                     std::cout << std::to_string(row.rowid);
-                } else if (map_column_position[columns[i]]-1 < row.field.size()) {
-                    field = row.field[map_column_position[columns[i]]-1];
-                    std::cout << *static_cast<std::string*>(field.field_value);
-                } else {
-                    std::cout << "NULL";
-                }
+                } else if (map_column_position[columns[i]] < row.field.size()) {
+                    field = row.field[map_column_position[columns[i]]];
+                    if (field.field_type == Database::SerialType::SERIAL_NULL) {
+                        std::cout << "NULL";
+                    } else {
+                        std::cout << *static_cast<std::string*>(field.field_value);
+                    }
+                } 
                 
                 if(columns.size() > 1 && i != columns.size() - 1) {
                     std::cout << '|';
                 }
             }
+
             std::cout << std::endl;
         }
 
@@ -411,4 +427,16 @@ read interior table page, page type = 10 (II)
 3. read the cells in interior table cells format
 4. get the absolute page offset and page type
 5. if page_type = 13, goto (I), if 10 goto (II)
+*/
+
+/*                             
+CREATE TABLE "superheroes" 
+(id integer primary key autoincrement, -1
+name text not null, 1
+eye_color text, 2
+hair_color text, 3
+appearance_count integer, 4
+first_appearance text, 5
+first_appearance_year text) 6
+
 */

@@ -3,84 +3,6 @@
 namespace Database {
     std::ifstream *db;
 
-    std::vector<RowField> read_row_debug (size_t offset) {
-        std::vector<RowField> fields;
-        size_t field_id_offset = offset;
-        uint32_t row_header_size = Decode::read_varint(db, offset, field_id_offset);
-        //std::cout << "starting payload offset (header): " << offset << std::endl;
-        // int row_header_size = Decode::read_varint_new(db, offset);
-        // field_id_offset = offset;
-        //std::cout << "starting column varint offset: " << field_id_offset << std::endl;
-
-        printf("row header size: %d \n", row_header_size);
-        //printf("field_id_offset: %u \n", field_id_offset);
-        size_t start = field_id_offset;
-        size_t end = start + row_header_size - 1;
-        printf("(start, end) = %zu %zu \n", start, end);
-        int counter = 0;
-        while (start < end) {
-            counter++;
-            uint32_t serial_type = Decode::read_varint(db, start, start);
-            printf("serial type: %d \n", serial_type);
-            if (serial_type >= 13 && serial_type & 1) {
-                RowField field;
-                field.field_type = SERIAL_BLOB_ODD;
-                field.field_size = (serial_type - 13) >> 1;
-                fields.push_back(field);
-            } else if (serial_type >= 12 && !(serial_type & 1)) {
-                RowField field;
-                field.field_type = SERIAL_BLOB_EVEN;
-                field.field_size = (serial_type - 12) >> 1;
-                fields.push_back(field);
-            } else if (serial_type == 1) {
-                RowField field;
-                field.field_type = SERIAL_8_BIT_INTEGER;
-                field.field_size = 1;
-                fields.push_back(field);
-            } else if (serial_type == 9) {
-                RowField field;
-                field.field_type = INTEGER_1;
-                field.field_size = 0;
-                fields.push_back(field);              
-            }
-        }
-
-        std::cout << "done " << counter << " times, pushed " << fields.size() << " times" << " start offset: " << start << std::endl;
-        for (auto it = fields.begin(); it != fields.end(); ++it) {
-            std::cout << "field type: " << it->field_type << std:: endl;
-            if (it->field_type == SERIAL_BLOB_ODD) {
-                std::cout << "start: " << start << std::endl;
-                char buff[1024] = {};
-                db->seekg(start, std::ios::beg);
-                db->read(buff, it->field_size);
-                start += it->field_size;
-                std::string *s = new std::string(buff);
-                std::cout << "buff: " << *s << std::endl;
-                it->field_value = static_cast<void*>(s);
-
-            } else if (it->field_type == SERIAL_BLOB_EVEN) {
-                std::cout << "start: " << start << std::endl;
-                char buff[1024] = {};
-                db->seekg(start, std::ios::beg);
-                db->read(buff, it->field_size);
-                start += it->field_size;
-                std::string *s = new std::string(buff);
-                std::cout << "buff: " << *s << std::endl;
-                it->field_value = static_cast<void*>(s);
-
-            } else if (it->field_type == SERIAL_8_BIT_INTEGER) {
-                char buf[1] = {};
-                db->seekg(start, std::ios::beg);
-                db->read(buf, it->field_size);
-                start += it->field_size;
-                uint16_t *val = new uint16_t(static_cast<unsigned char>(buf[0]));
-                it->field_value = static_cast<void*>(val);
-            }
-        }
-        std::cout << "done" << std::endl;
-        return fields;
-    }
-
     std::vector<RowField> read_row (size_t offset) {
         std::vector<RowField> fields;
         size_t field_id_offset = offset;
@@ -97,13 +19,22 @@ namespace Database {
                 field.field_type = SERIAL_BLOB_ODD;
                 field.field_size = (serial_type - 13) >> 1;
                 fields.push_back(field);
-            } else if (serial_type == 1) {
+            } 
+            else if (serial_type == 0) {
+                RowField field;
+                field.field_type = SERIAL_NULL;
+                field.field_size = 0;
+                fields.push_back(field);
+            }
+            else if (serial_type == 1) {
                 RowField field;
                 field.field_type = SERIAL_8_BIT_INTEGER;
                 field.field_size = 1;
                 fields.push_back(field);
-            }
+            } 
         }
+        //std::cout << "field size: " << fields.size() << std::endl;
+        int counter = 0;
         for (auto it = fields.begin(); it != fields.end(); ++it) {
             if (it->field_type == SERIAL_BLOB_ODD) {
                 char buff[1024] = {};
@@ -112,14 +43,19 @@ namespace Database {
                 start += it->field_size;
                 std::string *s = new std::string(buff);
                 it->field_value = static_cast<void*>(s);
-            } else if (it->field_type == SERIAL_8_BIT_INTEGER) {
+            } 
+            else if (it->field_type == SERIAL_NULL) {
+                //(no need to read db since field_size = 0)
+                it->field_value = nullptr;
+            }
+            else if (it->field_type == SERIAL_8_BIT_INTEGER) {
                 char buf[1] = {};
                 db->seekg(start, std::ios::beg);
                 db->read(buf, it->field_size);
                 start += it->field_size;
                 uint16_t *val = new uint16_t(static_cast<unsigned char>(buf[0]));
                 it->field_value = static_cast<void*>(val);
-            }
+            } 
         }
         return fields;
     }
