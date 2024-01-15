@@ -85,6 +85,117 @@ namespace Query {
 
     }
 
+    Database::IndexInteriorPage read_index_interior_page (size_t page_offset) {
+        Database::IndexInteriorPage page;
+        //read cell count
+        Database::db->seekg(page_offset + 3, std::ios::beg);
+        char buf[2] = {};
+        Database::db->read(buf, 2);
+        uint16_t cell_count = Decode::to_uint16_t(buf);
+        page.cell_count = cell_count;
+
+        //read rightmost pointer
+        Database::db->seekg(page_offset + 8, std::ios::beg);
+        char buff[4] = {};
+        Database::db->read(buff, 4);
+        uint32_t rightmost_pointer = Decode::to_uint32_t(buff);
+        page.rightmost_pointer = rightmost_pointer;
+
+        std::cout << "(2) cell count: " << cell_count << " rightmost pointer: " << rightmost_pointer << std::endl;
+
+        //jump the headers
+        size_t cell_offset = page_offset + Database::HeaderSize::INTERIOR;
+
+        //read the cell pointers array
+        std::vector<size_t> cell_offsets;
+        for (int i = 0; i < cell_count; ++i) {
+            Database::db->seekg(cell_offset, std::ios::beg);
+            char num[2] = {};
+            Database::db->read(num, 2);
+            //absoulte cell offset = page_offset + offset found at cell pointer array
+            cell_offsets.push_back(page_offset + Decode::to_uint16_t(num)); 
+            //std::cout << "cell pointers: " <<  page_offset << "+" << Decode::to_uint16_t(num) << std::endl;
+            cell_offset += 2;
+        }
+
+        //read index interior cell
+        // 1. 4 bytes left_child_pointer
+        // 2. payload size (in bytes)
+        // 3. payload
+        // 4. 4 bytes first_overflow_page
+        std::vector<Database::IndexInteriorCell> cells;
+        for (auto &offset: cell_offsets) {
+            Database::db->seekg(offset, std::ios::beg);
+            char num[4] = {};
+            Database::db->read(num, 4);
+            uint32_t left_child_pointer = Decode::to_uint32_t(num);
+            size_t rowid_offset = offset + 4;
+
+            //std::cout << "lcp: " << left_child_pointer << std::endl;
+
+            size_t payload_offset;
+            uint32_t payload_size = Decode::read_varint(Database::db, rowid_offset, payload_offset);
+
+            //std::cout << "offsets: " << rowid_offset << " " << payload_offset << std::endl;
+
+            std::vector<Database::RowField> field = Database::read_row(payload_offset);
+
+            //read overflow page
+
+            Database::IndexInteriorCell cell = {
+                .left_child_pointer = left_child_pointer, 
+                .payload_size = payload_size,
+                .field = field
+            };
+            cells.push_back(cell);
+        }
+        page.cells = cells;
+
+        return page;
+    }
+
+    std::vector<Database::IndexLeafCell> read_index_leaf_cell (size_t page_offset) {
+        //read cell count
+        Database::db->seekg(page_offset + 3, std::ios::beg);
+        char buf[2] = {};
+        Database::db->read(buf, 2);
+        uint16_t cell_count = Decode::to_uint16_t(buf);
+
+        //jump the headers
+        size_t cell_offset = page_offset + Database::HeaderSize::LEAF;
+
+        //read the cell pointers array
+        std::vector<size_t> cell_offsets;
+        for (int i = 0; i < cell_count; ++i) {
+            Database::db->seekg(cell_offset, std::ios::beg);
+            char num[2] = {};
+            Database::db->read(num, 2);
+            //absoulte cell offset = page_offset + offset found at cell pointer array
+            cell_offsets.push_back(page_offset + Decode::to_uint16_t(num)); 
+
+            //std::cout << "cell pointers: " <<  page_offset + Decode::to_uint16_t(num) << std::endl;
+            cell_offset += 2;
+        }
+
+        //read index leaf cell
+        // 1. payload size (in bytes)
+        // 2. payload
+        // 3. 4 bytes first_overflow_page
+        std::vector<Database::IndexLeafCell> table;
+        for (auto &offset: cell_offsets) {
+            size_t payload_offset;
+            uint32_t payload_size = Decode::read_varint(Database::db, offset, payload_offset);
+            //std::cout << "offsets: " << rowid_offset << " " << payload_offset << std::endl;
+            std::vector<Database::RowField> field = Database::read_row(payload_offset);
+            Database::IndexLeafCell cell = {
+                .payload_size = payload_size,
+                .field = field
+            };
+            table.push_back(cell);
+        }
+        return table;
+    }
+
     std::string lower_string (std::string s) {
         std::string result = s;
         std::transform(result.begin(), result.end(), result.begin(),
@@ -166,7 +277,10 @@ namespace Query {
         }
     }
 
-    std::vector<WhereCondition> get_where_clause (const std::string &query, size_t &offset) {
+    std::vector<WhereCondition> get_where_clause (
+        const std::string &query, 
+        size_t &offset
+        ) {
         std::vector<WhereCondition> conditions;
         std::stringstream ss(query);
         ss.seekg(offset);
@@ -198,7 +312,8 @@ namespace Query {
 
     DDLStatement parse_table_definition (
         const std::string &table_name,
-        const std::string &table_definition) {
+        const std::string &table_definition
+    ) {
 
         DDLStatement def;
         std::stringstream ss(table_definition);
@@ -242,7 +357,8 @@ namespace Query {
         const DQLStatement &query, 
         const DDLStatement &table_def, 
         std::vector<Database::TableLeafCell> &table,
-        uint32_t id) {
+        uint32_t id
+    ) {
         std::map<std::string, int> map_column_position;
 
         for(size_t i = 0; i < table_def.columns.size(); ++i) {
@@ -347,69 +463,150 @@ namespace Query {
         const Query::DDLStatement &def
         ) {
         for (auto &c: table) {
-            //std::cout << "left child pointer: " << c.left_child_pointer << " rowid: " << c.rowid;
+            
             const size_t page_offset = (c.left_child_pointer - 1) * page_size;
+            std::cout << "table interior left child pointer: " << c.left_child_pointer << " page offset: " << page_offset << " rowid: " << c.rowid << std::endl;
             Database::db->seekg(page_offset, std::ios::beg);
             char buf[1] = {};
             Database::db->read(buf, 1);
             uint16_t page_type = buf[0];
             //std::cout << " page_type: " << page_type << std::endl;
-            if (page_type == Database::PageType::LEAF_TABLE) {
+            if (page_type == Database::PageType::TABLE_LEAF) {
                 std::vector<Database::TableLeafCell> leaf_table = read_table_leaf_cell(page_offset);
                 print_query_result(query, def, leaf_table, c.rowid);
 
-            } else if (page_type == Database::PageType::INTERIOR_TABLE) {
+            } else if (page_type == Database::PageType::TABLE_INTERIOR) {
                 std::vector<Database::TableInteriorCell> interior_table = read_table_interior_cell(page_offset);
                 process_table_interior(interior_table, page_size, query, def);
             }
         }
     }
-    void process_select_from_statement(
-         const DQLStatement &query, 
-         const std::map<std::string, Database::TableLeafCell*> &table_map,
-         uint32_t page_size
+
+    void process_index_leaf (
+        std::vector<Database::IndexLeafCell> &table,
+        const uint32_t page_size,
+        const Query::DQLStatement &query,
+        const Query::DDLStatement &def
     ) {
-        auto master_table_row = table_map.at(query.table);
+        //std::cout << "cell size: " << table.size() << std::endl;
+        for(auto cell: table) {
+            char* id = static_cast<char*>(cell.field[1].field_value);
 
-        //parse table definition
-        std::string table_name = *static_cast<std::string*>(master_table_row->field[2].field_value);
-        std::string table_definition = *static_cast<std::string*>(master_table_row->field[4].field_value);
-        DDLStatement def = parse_table_definition(table_name, table_definition);
+            if (*static_cast<std:: string*>(cell.field[0].field_value) == "tonga") {
+                std::cout 
+                << " field size: " << cell.field.size()
+                << " country: " << *static_cast<std:: string*>(cell.field[0].field_value) 
+                //<< " page id: " << Decode::deserialize_24_bit_to_unsigned(id)
+                << " page id 8 bit: " << static_cast<uint16_t>(id[0])
+                << " page id type: " << cell.field[1].field_size
+                << std::endl; 
+            }      
+        }
+    }
 
-        //get page offset
-        uint16_t root_page = *static_cast<uint16_t*>(master_table_row->field[3].field_value);
-        const size_t page_offset = (root_page - 1) * page_size;
+    void process_index_interior (
+        Database::IndexInteriorPage &page,
+        const uint32_t page_size,
+        const Query::DQLStatement &query,
+        const Query::DDLStatement &def
+    
+    ) {
+        std::cout << "process_index_interior() cell size: " << page.cells.size() << std::endl;
+        for(auto cell: page.cells) {
+            const size_t page_offset = (cell.left_child_pointer - 1) * page_size;
+            std::cout << "lcp: " << cell.left_child_pointer << " offset: "<< page_offset << std::endl;
 
-        //read page types
+            Database::db->seekg(page_offset, std::ios::beg);
+            char buf[1] = {};
+            Database::db->read(buf, 1);
+            uint16_t page_type = buf[0];
+
+            //char* id = static_cast<char*>(cell.field[1].field_value);
+            // std::cout 
+            // << "page_type: " << page_type 
+            // << " field size: " << cell.field.size()
+            // << " country: " << *static_cast<std:: string*>(cell.field[0].field_value) 
+            // << " page id: " << Decode::deserialize_24_bit_to_unsigned(id)
+            // //<< " page id 8 bit: " << static_cast<uint16_t>(id[0])
+            // << " page id serial type: " << cell.field[1].field_type
+            // << std::endl;
+
+            if (page_type == Database::PageType::INDEX_INTERIOR) {
+                Database::IndexInteriorPage index_interior = read_index_interior_page(page_offset);
+                process_index_interior(index_interior, page_size, query, def);
+            }
+            else if (page_type == Database::PageType::INDEX_LEAF) {
+                std::vector<Database::IndexLeafCell> index_leaf = read_index_leaf_cell(page_offset);
+                process_index_leaf(index_leaf, page_size, query, def);
+
+            }
+        }
+
+        //process rightmost pointer
+        const size_t page_offset = (page.rightmost_pointer - 1) * page_size;
+        std::cout << "rmp: " << page.rightmost_pointer << " offset: "<< page_offset << std::endl;
+
         Database::db->seekg(page_offset, std::ios::beg);
         char buf[1] = {};
         Database::db->read(buf, 1);
         uint16_t page_type = buf[0];
 
-        //read cell count
-        Database::db->seekg(page_offset + 3, std::ios::beg);
-        char buff[2] = {};
-        Database::db->read(buff, 2);
-        uint16_t cell_count = Decode::to_uint16_t(buff);
-
-        //std::cout << "cell count: " << cell_count << std::endl;
-
-        if (page_type == Database::PageType::LEAF_TABLE && query.columns.size() == 1 && query.columns[0] == "count(*)") {
-            printf("%u\n", cell_count);
-            return;
+        if (page_type == Database::PageType::INDEX_INTERIOR) {
+                Database::IndexInteriorPage index_interior = read_index_interior_page(page_offset);
+                process_index_interior(index_interior, page_size, query, def);
         }
-        else if (query.columns.size() > 0) {
-            if (page_type == Database::PageType::LEAF_TABLE) {
-                std::vector<Database::TableLeafCell> table = read_table_leaf_cell(page_offset);
-                print_query_result(query, def, table, 0);
+        else if (page_type == Database::PageType::INDEX_LEAF) {
+            std::vector<Database::IndexLeafCell> index_leaf = read_index_leaf_cell(page_offset);
+            process_index_leaf(index_leaf, page_size, query, def);
+        }
 
-            } else if (page_type == Database::PageType::INTERIOR_TABLE) { 
+    }
 
-                std::vector<Database::TableInteriorCell> table = read_table_interior_cell(page_offset);
-                process_table_interior(table, page_size, query, def);
+    void process_select_from_statement(
+         const DQLStatement &query, 
+         const std::map<std::string, std::vector<Database::PageHeader>> &table_map,
+         uint32_t page_size
+    ) {
+        for (auto table: table_map.at(query.table)) {
+            //parse table definition
+            std::string table_name = table.name;
+            std::string table_definition = table.definition;
+            DDLStatement def = parse_table_definition(table_name, table_definition);
+    
+            //get page offset
+            const size_t page_offset = table.page_offset;
+    
+            //read page types
+            uint16_t page_type = table.page_type;
+    
+            //read cell count
+            uint16_t cell_count = table.cell_count;
+    
+            std::cout << "table: " << table_name << " cell count: " << cell_count << " page type: " << page_type << std::endl;
+    
+            if (page_type == Database::PageType::TABLE_LEAF 
+            && query.columns.size() == 1 
+            && query.columns[0] == "count(*)"
+            ) {
+                printf("%u\n", cell_count);
+                return;
+            }
+            else if (query.columns.size() > 0) {
+                if (page_type == Database::PageType::TABLE_LEAF) {
+                    std::vector<Database::TableLeafCell> table = read_table_leaf_cell(page_offset);
+                    print_query_result(query, def, table, 0);
+    
+                } else if (page_type == Database::PageType::TABLE_INTERIOR) { 
+                    // std::vector<Database::TableInteriorCell> table = read_table_interior_cell(page_offset);
+                    // process_table_interior(table, page_size, query, def);
+    
+                } else if (page_type == Database::PageType::INDEX_INTERIOR) { 
+                    //std::cout << "READ INTERIOR INDEX" << std::endl;
+                    Database::IndexInteriorPage page = read_index_interior_page(page_offset);
+                    process_index_interior(page, page_size, query, def);
+                }
             }
         }
-
     }
 
 
@@ -427,16 +624,4 @@ read interior table page, page type = 10 (II)
 3. read the cells in interior table cells format
 4. get the absolute page offset and page type
 5. if page_type = 13, goto (I), if 10 goto (II)
-*/
-
-/*                             
-CREATE TABLE "superheroes" 
-(id integer primary key autoincrement, -1
-name text not null, 1
-eye_color text, 2
-hair_color text, 3
-appearance_count integer, 4
-first_appearance text, 5
-first_appearance_year text) 6
-
 */

@@ -47,11 +47,14 @@ int main(int argc, char* argv[]) {
 
     // Process master table
     std::vector<Database::TableLeafCell> master_table = Database::read_master_table();
-    std::map<std::string, Database::TableLeafCell*> table_map;
+    //std::map<std::string, std::vector<Database::TableLeafCell*>> table_map;
+
+    std::map<std::string, std::vector<Database::PageHeader>> table_map;
 
     for (auto &row: master_table) {
         std::string table_name = *static_cast<std::string*>(row.field[2].field_value);
-        table_map[table_name] = &row;
+        Database::PageHeader page_header = Database::read_page_header(&row, page_size);
+        table_map[table_name].push_back(page_header);
     }  
 
     //Process command
@@ -78,3 +81,15 @@ int main(int argc, char* argv[]) {
     }
     return 0;
 }
+
+
+/* 
+RETRIEVE DATA USING AN INDEX
+1. From master table, find the tables (in form of page offset from the root page number), it should be of type INDEX INTERIOR
+2. Read the table as usual: read cell count, refer to the cell pointer array, and read the cell
+3. The cell itself will contain two things: Indexed column and row id. In our case, the indexed column is "country". 
+Country and Row id pair will tell you which rows in the database have the country you're looking for.
+4. Follow left pointers (or right pointers?) to get the rows
+5. Somehow, we can compare the rows obtained from the pages pointed by left/right pointers to the index cells 
+
+*/

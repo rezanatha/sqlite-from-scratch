@@ -2,13 +2,28 @@
 
 namespace Decode {
     uint16_t to_uint16_t (const char *buffer) {
-        /* read 2 bytes in big endian */
+        /* read EXACTLY 2 bytes in big endian */
         uint16_t result;
         memcpy(&result, buffer, sizeof(uint16_t));
         return ntohs(result);
     }
+
+    uint32_t deserialize_24_bit_to_unsigned (const char *buffer) {
+        /* read EXACTLY 3 bytes in big endian, return uint32_t*/
+        uint32_t result = 0;
+        result |= static_cast<unsigned char>(buffer[0]) << 16;
+        result |= static_cast<unsigned char>(buffer[1]) << 8;
+        result |= static_cast<unsigned char>(buffer[2]);
+
+        std::cout << std::bitset<8>(buffer[0]) 
+        << ' ' << std::bitset<8>(buffer[1]) 
+        << ' ' << std::bitset<8>(buffer[2]) 
+        << std::endl;
+
+        return result;
+    }
     uint32_t to_uint32_t (const char *buffer) {
-        /* read 4 bytes in big endian */
+        /* read EXACTLY 4 bytes in big endian */
         uint32_t result;
         memcpy(&result, buffer, sizeof(uint32_t));
         return ntohl(result);
