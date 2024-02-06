@@ -11,17 +11,39 @@ namespace Decode {
     uint32_t deserialize_24_bit_to_unsigned (const char *buffer) {
         /* read EXACTLY 3 bytes in big endian, return uint32_t*/
         uint32_t result = 0;
-        result |= static_cast<unsigned char>(buffer[0]) << 16;
-        result |= static_cast<unsigned char>(buffer[1]) << 8;
-        result |= static_cast<unsigned char>(buffer[2]);
 
-        std::cout << std::bitset<8>(buffer[0]) 
-        << ' ' << std::bitset<8>(buffer[1]) 
-        << ' ' << std::bitset<8>(buffer[2]) 
-        << std::endl;
+        result =  static_cast<unsigned char>(buffer[0]) << 16|
+                 (static_cast<unsigned char>(buffer[1]) << 8) |
+                 (static_cast<unsigned char>(buffer[2]))
+                 ;
+
+        // std::cout << std::bitset<8>(buffer[0]) 
+        // << ' ' << std::bitset<8>(buffer[1]) 
+        // << ' ' << std::bitset<8>(buffer[2]) 
+        // << std::endl;
 
         return result;
     }
+
+
+    int32_t deserialize_24_bit_to_signed (const char *buffer) {
+        /* read EXACTLY 3 bytes in big endian, return int32_t*/
+        int32_t result = 0;
+
+        result = static_cast<int>(
+                  static_cast<unsigned char>(buffer[2]) |
+                 (static_cast<unsigned char>(buffer[1]) << 8) |
+                 (static_cast<unsigned char>(buffer[0]) << 16)
+                 );
+        
+
+        // std::cout << std::bitset<8>(buffer[0]) 
+        // << ' ' << std::bitset<8>(buffer[1]) 
+        // << ' ' << std::bitset<8>(buffer[2]) 
+        // << ' ';
+        return result;
+    }
+
     uint32_t to_uint32_t (const char *buffer) {
         /* read EXACTLY 4 bytes in big endian */
         uint32_t result;
@@ -51,25 +73,34 @@ namespace Decode {
     return varint_value;
     }
 
-    uint64_t read_varint_new (std::ifstream *db, uint16_t &offset) {
-        db->seekg(offset, std::ios::beg);
+    uint64_t read_varint_new (std::ifstream *db, size_t &offset) {
         uint64_t result = 0;
-        int shift = 0;
-        uint8_t byte;
+        uint8_t bytes_read = 0;
+        db->seekg(offset, std::ios::beg);
     
-        do {
-            if (!db->read(reinterpret_cast<char*>(&byte), sizeof(byte))) {
-                // Handle error or end of file
-                throw std::runtime_error("Error reading varint from the stream");
+        while (true)
+        {
+            uint8_t current;
+            db->read((char *)&current, 1);
+            bytes_read++;
+    
+            if (bytes_read < 9)
+            {
+                result = (result << 7) | (current & 0x7f);
+                if (current < 0x80)
+                {
+                    break;
+                }
             }
+            else
+            {
+                result = (result << 8) | current;
+                break;
+            }
+        }
+        offset += bytes_read;
     
-            result |= static_cast<uint64_t>(byte & 0x7F) << shift;
-            shift += 7;
-            offset++;
-        } while (byte & 0x80);
-
-    
-    return result;
+        return result;
     }
 }
 

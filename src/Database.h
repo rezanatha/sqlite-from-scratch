@@ -44,13 +44,14 @@ namespace Database {
     };
 
     struct RowField {
-        SerialType field_type;     // HEADER
-        int field_size;            // TRANSLATED FROM HEADER
+        SerialType field_type;     // RECORD HEADER
+        int field_size;            // TRANSLATED FROM RECORD HEADER
         void* field_value;         // BODY
     };
 
     struct PageHeader {
         std::string name;
+        std::string type;
         std::string definition;
         size_t page_offset;
         uint16_t page_type;
@@ -58,8 +59,9 @@ namespace Database {
     };
 
     struct TableLeafCell {
+        size_t offset;
         size_t payload_size;
-        uint32_t rowid;
+        int32_t rowid;
         std::vector<RowField> field;
     };
 
@@ -119,14 +121,19 @@ namespace Database {
     };
 
     std::vector<RowField> read_row (size_t offset);
-    std::vector<RowField> read_row_debug (size_t offset);
+    //std::vector<RowField> read_row_debug (size_t offset);
     uint32_t db_header_page_size();
     uint32_t db_header_num_of_pages();
     uint32_t db_header_encoding();
 
     uint16_t master_header_cell_count();
     std::vector<TableLeafCell> read_master_table();
-    PageHeader read_page_header (TableLeafCell* master_table_row, const uint32_t page_size);
+    PageHeader read_page_header (TableLeafCell &master_table_row, const uint32_t page_size);
+
+    uint8_t read_1_byte_from_db(std::ifstream *db, size_t offset);
+    uint16_t read_2_bytes_from_db(std::ifstream *db, size_t offset);
+    uint32_t read_4_bytes_from_db(std::ifstream *db, size_t offset);
+
 }
 
 #endif

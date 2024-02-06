@@ -4,15 +4,16 @@ namespace Database {
     std::ifstream *db;
 
     std::vector<RowField> read_row (size_t offset) {
+        int start_offset = offset;
         std::vector<RowField> fields;
         size_t field_id_offset = offset;
-        size_t row_header_size = Decode::read_varint(db, offset, field_id_offset);
+        size_t row_header_size = Decode::read_varint_new(db, field_id_offset);
         //printf("row header size: %zu \n", row_header_size);
-        //printf("offset: %zu, field_id_offset: %zu \n", offset, field_id_offset);
+
         size_t start = field_id_offset;
         size_t end = start + row_header_size - 1;
         while (start < end) {
-            uint32_t serial_type = Decode::read_varint(db, start, start);
+            uint32_t serial_type = Decode::read_varint_new(db, start);
             //printf("current offset: %zu, serial type: %d \n", start, serial_type);
 
             if (serial_type == 0) {
@@ -58,20 +59,22 @@ namespace Database {
                 it->field_value = static_cast<void*>(val);
 
             } else if (it->field_type == SERIAL_16_BIT_INTEGER) {
-                char buf[2] = {};
+                char buf[SERIAL_16_BIT_INTEGER] = {};
                 db->seekg(start, std::ios::beg);
                 db->read(buf, it->field_size);
+                it->field_value = malloc(SERIAL_16_BIT_INTEGER);
+                memcpy(it->field_value, buf, SERIAL_16_BIT_INTEGER);
                 start += it->field_size;
-                int16_t *val = new int16_t(static_cast<unsigned char>(buf[0]));
-                it->field_value = static_cast<void*>(val);
 
             } else if (it->field_type == SERIAL_24_BIT_INTEGER) {
-                char buf[3] = {};
+                char buf[SERIAL_24_BIT_INTEGER] = {};
                 db->seekg(start, std::ios::beg);
                 db->read(buf, it->field_size);
+                it->field_value = malloc(SERIAL_24_BIT_INTEGER);
+                memcpy(it->field_value, buf, SERIAL_24_BIT_INTEGER);
+
                 start += it->field_size;
-                uint32_t *val = new uint32_t(static_cast<unsigned char>(buf[0]));
-                it->field_value = static_cast<void*>(val);
+                //it->field_value = static_cast<void*>(buf);
 
             } else if (it->field_type == SERIAL_BLOB_ODD) {
                 char buff[1024] = {};
@@ -124,66 +127,77 @@ namespace Database {
         // Master table is a leaf b-tree that resides just after database header. 
         // Cell offsets are located after master table's header.
         uint16_t cell_count = master_header_cell_count();
-        int cell_offset = Database::HeaderSize::DATABASE + Database::HeaderSize::LEAF; 
-        //std::cout << "offset: " << cell_offset << std::endl;
+        size_t cell_offset = Database::HeaderSize::DATABASE + Database::HeaderSize::LEAF; 
         std::vector<size_t> cell_offsets;
         for (int i = 0; i < cell_count; ++i) {
-            db->seekg(cell_offset, std::ios::beg);
-            char buf[2] = {};
-            db->read(buf, 2);
-            cell_offsets.push_back(Decode::to_uint16_t(buf));
+            cell_offsets.push_back(read_2_bytes_from_db(db, cell_offset));
             cell_offset += 2;
         }
 
-        // for(auto &a: cell_offsets) {
-        //     std::cout << a << std::endl;
-        // }
-
         std::vector<TableLeafCell> master_table;
         for (auto &offset: cell_offsets) {
-            size_t row_id_offset = offset, payload_offset = offset;
-            TableLeafCell cell = {
-                .payload_size = static_cast<size_t>(Decode::read_varint(Database::db, offset, row_id_offset)),
-                .rowid =  static_cast<uint32_t>(Decode::read_varint(Database::db, row_id_offset, payload_offset)),
-                .field = read_row(payload_offset),
-            };
-            // Row row = {
-            //     .row_size = Decode::read_varint(Database::db, offset, row_id_offset),
-            //     .row_id = Decode::read_varint(Database::db, row_id_offset, payload_offset),
-            //     .field = read_row(payload_offset),
-            // };
+            size_t var_offset = offset;
+
+            TableLeafCell cell;
+            cell.payload_size = static_cast<size_t>(Decode::read_varint_new(Database::db, var_offset));
+            cell.rowid =  static_cast<int32_t>(Decode::read_varint_new(Database::db, var_offset));
+            cell.field = read_row(var_offset);
+            
             master_table.push_back(cell);
         }
         return master_table;
     }
 
-    PageHeader read_page_header (TableLeafCell* master_table_row, const uint32_t page_size) {
+    PageHeader read_page_header (TableLeafCell &master_table_row, const uint32_t page_size) {
         //get page offset
-        uint16_t root_page = *static_cast<uint16_t*>(master_table_row->field[3].field_value);
+        size_t root_page;
+        if (master_table_row.field[3].field_type == 3) {
+            root_page = Decode::deserialize_24_bit_to_signed(static_cast<char*>(master_table_row.field[3].field_value));
+        } else {
+            root_page = *static_cast<uint8_t*>(master_table_row.field[3].field_value);
+        }
+        //uint32_t root_page = *static_cast<uint16_t*>(master_table_row.field[3].field_value);
         const size_t page_offset = (root_page - 1) * page_size;
 
         //std::cout << "root page: " << root_page << " page offset " << page_offset << std::endl;
 
         //read page types
-        Database::db->seekg(page_offset, std::ios::beg);
-        char buf[1] = {};
-        Database::db->read(buf, 1);
-        uint16_t page_type = buf[0];
+        uint16_t page_type = read_1_byte_from_db(Database::db, page_offset);
 
         //read cell count
-        Database::db->seekg(page_offset + 3, std::ios::beg);
-        char buff[2] = {};
-        Database::db->read(buff, 2);
-        uint16_t cell_count = Decode::to_uint16_t(buff);
+        uint16_t cell_count = read_2_bytes_from_db(Database::db, page_offset + 3);
 
-        //std::cout << "cell count: " << cell_count << std::endl;
+        //std::cout << "name: " << *static_cast<std::string*>(master_table_row.field[1].field_value) << " " << page_type << std::endl;
 
-        return {
-            .name = *static_cast<std::string*>(master_table_row->field[2].field_value),
-            .definition = *static_cast<std::string*>(master_table_row->field[4].field_value),
-            .page_offset = page_offset,
-            .page_type = page_type,
-            .cell_count = cell_count,
-        };
+        PageHeader header;
+        header.name = *static_cast<std::string*>(master_table_row.field[2].field_value);
+        header.type = *static_cast<std::string*>(master_table_row.field[0].field_value);
+        header.definition = *static_cast<std::string*>(master_table_row.field[4].field_value);
+        header.page_offset = page_offset;
+        header.page_type = page_type;
+        header.cell_count = cell_count;
+        return header;
+
+   }
+   uint8_t read_1_byte_from_db(std::ifstream *db, size_t offset) {
+        db->seekg(offset, std::ios::beg);
+        char buf[1] = {};
+        db->read(buf, 1);
+
+        return buf[0];    
+   }
+   uint16_t read_2_bytes_from_db(std::ifstream *db, size_t offset) {
+        db->seekg(offset, std::ios::beg);
+        char buf[2] = {};
+        db->read(buf, 2);
+        
+        return Decode::to_uint16_t(buf);    
+   }
+   uint32_t read_4_bytes_from_db(std::ifstream *db, size_t offset) {
+        db->seekg(offset, std::ios::beg);
+        char buf[4] = {};
+        db->read(buf, 4);
+        
+        return Decode::to_uint32_t(buf);    
    }
 }    
