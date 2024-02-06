@@ -175,6 +175,20 @@ namespace Query {
         return page;
     }
 
+    size_t read_row_id (Database::RowField &field) {
+        size_t row_id;
+        if (field.field_type == 2) {
+            row_id = Decode::to_uint16_t(static_cast<char*>(field.field_value));
+        }
+        else if (field.field_type == 3) {
+            row_id = Decode::deserialize_24_bit_to_signed(static_cast<char*>(field.field_value));
+        }
+        else {
+            std::cout << "row_id type: " << field.field_type << std::endl;
+            throw std::logic_error("unknown field type.");
+        }
+        return row_id;
+    }
     void process_table_interior (
         Database::TableInteriorPage &page, 
         const uint32_t page_size,
@@ -474,7 +488,7 @@ namespace Query {
             char* id = static_cast<char*>(cell.field[1].field_value);
             int32_t decoded_id;
             
-            if (*static_cast<std:: string*>(cell.field[0].field_value) == "eritrea") {
+            if (*static_cast<std:: string*>(cell.field[0].field_value) == "chad") {
                 if (cell.field[1].field_size == 2) {
                     decoded_id = Decode::to_uint16_t(id);
                 }
@@ -571,18 +585,16 @@ namespace Query {
             std::string cell_key = *static_cast<std::string*>(field[0].field_value);
 
             //std::cout << cell_key << std::endl;
-
+            
             if (cell_key >= query_key) {
                 while (start <= end) {
                     //read cell at mid
                     size_t offset = cell_offsets.at(mid);
-                    //std::cout << offset << " " << mid << std::endl;
-
                     size_t payload_offset = offset + 4;
                     uint32_t payload_size = Decode::read_varint_new(Database::db, payload_offset);
                     std::vector<Database::RowField> field = Database::read_row(payload_offset);
                     std::string cell_key = *static_cast<std::string*>(field[0].field_value);
-                    size_t row_id = Decode::deserialize_24_bit_to_signed(static_cast<char*>(field[1].field_value));
+                    size_t row_id = read_row_id (field[1]);
 
                     bool cond = cell_key < query_key;
                     //std::cout << "cell key: " << cell_key << " query_key: " << query_key  << " row_id: " << row_id << " cell key < query key " << cond;
@@ -590,123 +602,81 @@ namespace Query {
                     if (cell_key < query_key) {
                         start = mid+1;
                         mid = start+(end-start)/2;
-                        //std::cout << "START: " << start << " " << mid << " " << end << std::endl;
                     }
                     else if (cell_key > query_key) {
                         end = mid-1;
                         mid = start+(end-start)/2;
                     }
                     else {
-                        //std::cout << "+++start searching +++++" << std::endl;
-                        uint32_t left_child_pointer = Database::read_4_bytes_from_db(Database::db, offset);
-                        if (cell_key == query_key) {
-                             row_ids.push_back(row_id);
-                        }
-
-                        size_t lcp_offset = (left_child_pointer - 1) * page_size;
-                        //std::cout << "offset: " << offset << " lcp offset: " << lcp_offset << std::endl;
-                        std::vector<size_t> r = find_row_id_from_index(lcp_offset, page_size, query, def, ++depth);
-                        row_ids.insert(row_ids.end(), r.begin(), r.end());
-
-                        std::vector<size_t> r_down;
-                        int32_t mid_down = mid-1;
-                        uint32_t lcp_down = left_child_pointer;
-                        std::string cell_key_down;
-
-                        while (mid_down >= 0) {
-                            size_t offset = cell_offsets.at(mid_down--);
-                            lcp_down = Database::read_4_bytes_from_db(Database::db, offset);
-                            size_t payload_offset = offset + 4;
-                            uint32_t payload_size = Decode::read_varint_new(Database::db, payload_offset);
-                            std::vector<Database::RowField> field = Database::read_row(payload_offset);
-                            cell_key_down = *static_cast<std::string*>(field[0].field_value); 
-                            size_t row_id_down = Decode::deserialize_24_bit_to_signed(static_cast<char*>(field[1].field_value));
-
-                            if(cell_key_down < query_key) {
-                                break;
-                            } else if (cell_key_down == query_key) {
-                                row_ids.push_back(row_id_down);
-                            }
-
-                            lcp_offset = (lcp_down - 1) * page_size;
-                            //std::cout << " lcp offset: " << lcp_offset << std::endl;
-                            r_down = find_row_id_from_index(lcp_offset, page_size, query, def, ++depth);
-                            row_ids.insert(row_ids.end(), r_down.begin(), r_down.end());
-                        }
-        
-                        //go to front
-                        std::vector<size_t> r_up;
-                        int32_t mid_up = mid+1;
-                        uint32_t lcp_up = left_child_pointer;
-                        std::string cell_key_up;
-
-                        while (mid_up < cell_offsets.size()) {
-                            //std::cout << "check: " << mid_up << " " << cell_offsets.size() << std::endl;
-                            size_t offset = cell_offsets.at(mid_up++);
-                            lcp_up = Database::read_4_bytes_from_db(Database::db, offset);
-                            size_t payload_offset = offset + 4;
-                            std::vector<Database::RowField> field = Database::read_row(payload_offset);
-                            cell_key_up = *static_cast<std::string*>(field[0].field_value); 
-                            size_t row_id_up = Decode::deserialize_24_bit_to_signed(static_cast<char*>(field[1].field_value));
-
-                            lcp_offset = (lcp_up - 1) * page_size;
-                            r_up = find_row_id_from_index(lcp_offset, page_size, query, def, ++depth);
-
-                            if (r_up.size() == 0) {
-                                break;
-                            } else if (cell_key_down == query_key) {
-                                row_ids.push_back(row_id_up);
-                            }
-
-                            row_ids.insert(row_ids.end(), r_up.begin(), r_up.end());
-                        }
-
                         break;
                     }
                 } 
+
+                //regardless key found or not, go linearly to the lower bound (down) and upper bound (up) of our mid
+                
                 size_t offset = cell_offsets.at(mid);
+
                 uint32_t left_child_pointer = Database::read_4_bytes_from_db(Database::db, offset);
-                std::vector<size_t> r_down;
-                int32_t mid_down = mid;
-                uint32_t lcp_down = left_child_pointer;
-                std::string cell_key_down;
+                size_t payload_offset = offset + 4;
+                uint32_t payload_size = Decode::read_varint_new(Database::db, payload_offset);
+                std::vector<Database::RowField> field = Database::read_row(payload_offset);
+                std::string cell_key = *static_cast<std::string*>(field[0].field_value);
+                size_t row_id = read_row_id (field[1]);
+
+                //std::cout << "start searching lower and upper bound on " << cell_key << " " << row_id << std::endl;
+
+                if (cell_key == query_key) {
+                     row_ids.push_back(row_id);
+                }
+
+                size_t lcp_offset = (left_child_pointer - 1) * page_size;
+                //std::cout << "offset: " << offset << " lcp offset: " << lcp_offset << std::endl;
+                std::vector<size_t> r = find_row_id_from_index(lcp_offset, page_size, query, def, ++depth);
+                row_ids.insert(row_ids.end(), r.begin(), r.end());
+
+                //go lower bound
+                int32_t mid_down = mid-1;
                 while (mid_down >= 0) {
                     size_t offset = cell_offsets.at(mid_down--);
-                    lcp_down = Database::read_4_bytes_from_db(Database::db, offset);
+                    uint32_t lcp_down = Database::read_4_bytes_from_db(Database::db, offset);
                     size_t payload_offset = offset + 4;
                     uint32_t payload_size = Decode::read_varint_new(Database::db, payload_offset);
                     std::vector<Database::RowField> field = Database::read_row(payload_offset);
-                    cell_key_down = *static_cast<std::string*>(field[0].field_value); 
-                    size_t row_id_down = Decode::deserialize_24_bit_to_signed(static_cast<char*>(field[1].field_value));
+                    std::string cell_key_down = *static_cast<std::string*>(field[0].field_value); 
+                    size_t row_id_down = read_row_id (field[1]);
 
-                    //std::cout << "last try down: " << cell_key_down << " " << query_key << std::endl;
+                    //std::cout << "last try down: " << cell_key_down << " " << query_key << " at: " << row_id_down << std::endl;
                     if(cell_key_down < query_key) {
                         break;
                     } 
+                    if (cell_key == query_key) {
+                        row_ids.push_back(row_id);
+                    }
                     size_t lcp_offset = (lcp_down - 1) * page_size;
-                    //std::cout << " lcp offset: " << lcp_offset << std::endl;
-                    r_down = find_row_id_from_index(lcp_offset, page_size, query, def, ++depth);
+                    std::vector<size_t> r_down = find_row_id_from_index(lcp_offset, page_size, query, def, ++depth);
                     row_ids.insert(row_ids.end(), r_down.begin(), r_down.end());
                 }  
-                std::vector<size_t> r_up;
+
+                //go upper bound
                 int32_t mid_up = mid+1;
-                uint32_t lcp_up = left_child_pointer;
-                std::string cell_key_up;
                 while (mid_up < cell_offsets.size()) {
-                    //std::cout << "check: " << mid_up << " " << cell_offsets.size() << std::endl;
                     size_t offset = cell_offsets.at(mid_up++);
-                    lcp_up = Database::read_4_bytes_from_db(Database::db, offset);
+                    uint32_t lcp_up = Database::read_4_bytes_from_db(Database::db, offset);
                     size_t payload_offset = offset + 4;
+                    uint32_t payload_size = Decode::read_varint_new(Database::db, payload_offset);
                     std::vector<Database::RowField> field = Database::read_row(payload_offset);
-                    cell_key_up = *static_cast<std::string*>(field[0].field_value); 
-                    size_t row_id_up = Decode::deserialize_24_bit_to_signed(static_cast<char*>(field[1].field_value));
+                    std::string cell_key_up = *static_cast<std::string*>(field[0].field_value); 
+                    size_t row_id_up = read_row_id (field[1]);
+
+                    //std::cout << "last try up: " << cell_key_up << " " << query_key << std::endl;
                     size_t lcp_offset = (lcp_up - 1) * page_size;
-                    r_up = find_row_id_from_index(lcp_offset, page_size, query, def, ++depth);  
+                    std::vector<size_t> r_up = find_row_id_from_index(lcp_offset, page_size, query, def, ++depth);  
                     if (r_up.size() == 0) {
                         break;
-                    } else if (cell_key_down == query_key) {
+                    } else if (cell_key_up == query_key) {
                         row_ids.push_back(row_id_up);
                     }
+
                     row_ids.insert(row_ids.end(), r_up.begin(), r_up.end());
                 
                 }
@@ -721,7 +691,6 @@ namespace Query {
             
             //std::cout << "INDEX LEAF cell size: " << cell_count << std::endl;
             while (start <= end) {
-                
                 //read cell at mid
                 size_t offset = cell_offsets.at(mid);
     
@@ -735,8 +704,12 @@ namespace Query {
                 if (cell_key < query_key) {
                     start = mid+1;
                     mid = start+(end-start)/2;                   
-                } else if (cell_key == query_key) {
-                    size_t row_id = Decode::deserialize_24_bit_to_signed(static_cast<char*>(field[1].field_value));
+                } else if (cell_key > query_key) {
+                    end = mid-1;
+                    mid = start+(end-start)/2; 
+                } else  {
+                    assert(field[1].field_type == 2 || field[1].field_type == 3);
+                    size_t row_id = read_row_id (field[1]);                    
                     row_ids.push_back(row_id);
                     //std::cout << "row id for: " << cell_key << " " << row_id << std::endl;
 
@@ -746,17 +719,14 @@ namespace Query {
 
                     while(mid_down >= 0) {
                         size_t offset = cell_offsets.at(mid_down--);
-
                         uint32_t payload_size = Decode::read_varint_new(Database::db, offset);
                         std::vector<Database::RowField> field = Database::read_row(offset);
                         cell_key_down = *static_cast<std::string*>(field[0].field_value); 
-
+                        
                         if(cell_key_down != query_key) {
                             break;
                         }
-
-                        char* id = static_cast<char*>(field[1].field_value);
-                        row_id_down = Decode::deserialize_24_bit_to_signed(id);
+                        row_id_down = read_row_id (field[1]);
                         row_ids.push_back(row_id_down);
                         //std::cout << "row id down for: " << cell_key_down << " " << row_id_down << std::endl;
                     }
@@ -771,26 +741,21 @@ namespace Query {
                         uint32_t payload_size = Decode::read_varint_new(Database::db, offset);
                         std::vector<Database::RowField> field = Database::read_row(offset);
                         cell_key_up = *static_cast<std::string*>(field[0].field_value);
-
+                        
+                        
                         if(cell_key_up != query_key) {
                             break;
                         }
 
-                        char* id = static_cast<char*>(field[1].field_value); 
-                        row_id_up = Decode::deserialize_24_bit_to_signed(id);
+                        row_id_up = read_row_id (field[1]);
                         row_ids.push_back(row_id_up);
                         //std::cout << "row id up for: " << cell_key_up << " " << row_id_up << std::endl;
+                        
                     }
                     break;
-
-                } else {
-                    end = mid-1;
-                    mid = start+(end-start)/2; 
-                }
+                } 
             }
         }
-
-        //std::cout << "done binary search " << std::endl;
         return row_ids;
     }
     
@@ -1087,7 +1052,7 @@ namespace Query {
                 process_table_interior(page, page_size, query, def);
 
             } else if (page_type == Database::PageType::INDEX_INTERIOR) { //index table scan
-                //old full table scan
+                //old full table scan on index table
                 // Database::IndexInteriorPage page = read_index_interior_page(page_offset);
                 // process_index_interior(page, page_size, query, def);
 
